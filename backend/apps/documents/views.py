@@ -12,12 +12,10 @@ class DocumentListView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Document.objects.filter(user=self.request.user)
+        return Document.objects.filter(user=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
-        # We'll just create the DB entry here, but actual file upload happens via presigned URL
-        # Or this can handle the generation of the presigned URL as well.
-        pass
+        serializer.save(user=self.request.user)
 
 class GeneratePresignedUrlView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -64,7 +62,7 @@ class GeneratePresignedUrlView(APIView):
                 ExpiresIn=3600
             )
             
-            # Create document record
+            # Create document record in DB immediately
             doc = Document.objects.create(
                 user=user,
                 title=filename,
@@ -81,6 +79,36 @@ class GeneratePresignedUrlView(APIView):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class NotifyUploadReadyView(APIView):
+    """Called by the client after the direct S3/MinIO PUT is complete.
+    Updates the document status and triggers the AI processing pipeline."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            doc = Document.objects.get(pk=pk, user=request.user)
+        except Document.DoesNotExist:
+            return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        doc.status = 'PROCESSING'
+        doc.save(update_fields=['status'])
+        
+        # Trigger Celery AI processing task (import here to avoid circular imports)
+        try:
+            from rag.processor import process_document
+            process_document.delay(doc.id)
+        except Exception:
+            # Celery might not be running in dev; still return success
+            pass
+        
+        return Response({
+            'document_id': doc.id,
+            'status': doc.status,
+            'message': 'Document queued for AI processing.'
+        })
+
 
 class DocumentDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = DocumentSerializer

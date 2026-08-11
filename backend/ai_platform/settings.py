@@ -1,7 +1,16 @@
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 import environ
+
+# Fix for Windows: psycopg2 UnicodeDecodeError with non-ASCII system error messages
+# Force stdout/stderr to UTF-8 encoding on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -71,7 +80,17 @@ WSGI_APPLICATION = 'ai_platform.wsgi.application'
 ASGI_APPLICATION = 'ai_platform.asgi.application'
 
 DATABASES = {
-    'default': env.db('DATABASE_URL', default=f"postgres://{env('DB_USER', default='aiadmin')}:{env('DB_PASSWORD', default='secretpassword')}@{env('DB_HOST', default='localhost')}:{env('DB_PORT', default='5432')}/{env('DB_NAME', default='aipdfdb')}")
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': env('AIPDF_DB_NAME', default='aipdfdb'),
+        'USER': env('AIPDF_DB_USER', default='aiadmin'),
+        'PASSWORD': env('AIPDF_DB_PASSWORD', default='secretpassword'),
+        'HOST': env('AIPDF_DB_HOST', default='127.0.0.1'),
+        'PORT': env('AIPDF_DB_PORT', default='5433'),
+        'OPTIONS': {
+            'client_encoding': 'UTF8',
+        },
+    }
 }
 
 AUTH_USER_MODEL = 'users.CustomUser'
@@ -110,6 +129,7 @@ CELERY_RESULT_BACKEND = 'django-db'
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+CELERY_IMPORTS = ('rag.processor',)
 
 MINIO_ENDPOINT = env('MINIO_ENDPOINT', default='localhost:9000')
 MINIO_ACCESS_KEY = env('MINIO_ACCESS_KEY', default='minioadmin')
