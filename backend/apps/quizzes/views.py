@@ -69,59 +69,61 @@ class QuizGenerateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        document_id = request.data.get('document_id')
-        scope = request.data.get('scope', 'FULL')
-        num_questions = min(int(request.data.get('num_questions', 5)), 50)
-        question_types = request.data.get('question_types', ['MCQ'])
-        difficulty = request.data.get('difficulty', 'MEDIUM')
-
-        if not document_id:
-            return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            if request.user.role == 'ADMINISTRATEUR':
-                doc = Document.objects.get(pk=document_id)
-            else:
-                doc = Document.objects.get(pk=document_id, user=request.user)
-        except Document.DoesNotExist:
-            return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+            document_id = request.data.get('document_id')
+            scope = request.data.get('scope', 'FULL')
+            num_questions = min(int(request.data.get('num_questions', 5)), 50)
+            question_types = request.data.get('question_types', ['MCQ'])
+            difficulty = request.data.get('difficulty', 'MEDIUM')
 
-        # --- 1. Retrieve chunks based on scope ---
-        chunks_qs = Chunk.objects.filter(document=doc)
-        if scope == 'COMPLEX':
-            # Use longer chunks for complex concept questions
-            chunks_qs = chunks_qs.filter(content__len__gt=300)
-        
-        chunks = list(chunks_qs)
-        if not chunks:
-            return Response({'error': 'No document content found. Please ensure the document has been processed.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not document_id:
+                return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Sample chunks: use more chunks for larger quizzes
-        sample_size = min(len(chunks), max(num_questions * 2, 10))
-        sampled_chunks = random.sample(chunks, sample_size)
-        
-        chunk_context = "\n\n---\n\n".join([
-            f"[CHUNK_ID:{c.id}] (Page {c.page_number}):\n{c.content}"
-            for c in sampled_chunks
-        ])
-        chunk_id_map = {c.id: c for c in sampled_chunks}
+            try:
+                if request.user.role == 'ADMINISTRATEUR':
+                    doc = Document.objects.get(pk=document_id)
+                else:
+                    doc = Document.objects.get(pk=document_id, user=request.user)
+            except (Document.DoesNotExist, ValueError):
+                logger.warning(f"Invalid or missing document_id requested: {document_id}")
+                return Response({'error': 'Document not found or invalid ID format.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # --- 2. Build Gemini prompt ---
-        types_description = {
-            'MCQ': 'Multiple Choice (4 options)',
-            'TF': 'True/False',
-            'OPEN': 'Open-Ended (short answer)',
-        }
-        requested_types = ", ".join([types_description.get(t, t) for t in question_types])
-        
-        difficulty_instructions = {
-            'EASY': 'Keep questions simple and factual — directly from the text.',
-            'MEDIUM': 'Mix factual recall with light comprehension and inference.',
-            'HARD': 'Focus on deep understanding, analysis, and synthesis across multiple chunks.',
-            'ADAPTIVE': 'Start with easy factual questions, then progress to harder analytical ones.',
-        }
+            # --- 1. Retrieve chunks based on scope ---
+            chunks_qs = Chunk.objects.filter(document=doc)
+            if scope == 'COMPLEX':
+                # Use longer chunks for complex concept questions
+                chunks_qs = chunks_qs.filter(content__len__gt=300)
+            
+            chunks = list(chunks_qs)
+            if not chunks:
+                return Response({'error': 'No document content found. Please ensure the document has been processed.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        prompt = f"""You are an expert educational quiz creator. Based on the following document excerpts, generate exactly {num_questions} quiz questions.
+            # Sample chunks: use more chunks for larger quizzes
+            sample_size = min(len(chunks), max(num_questions * 2, 10))
+            sampled_chunks = random.sample(chunks, sample_size)
+            
+            chunk_context = "\n\n---\n\n".join([
+                f"[CHUNK_ID:{c.id}] (Page {c.page_number}):\n{c.content}"
+                for c in sampled_chunks
+            ])
+            chunk_id_map = {c.id: c for c in sampled_chunks}
+
+            # --- 2. Build Gemini prompt ---
+            types_description = {
+                'MCQ': 'Multiple Choice (4 options)',
+                'TF': 'True/False',
+                'OPEN': 'Open-Ended (short answer)',
+            }
+            requested_types = ", ".join([types_description.get(t, t) for t in question_types])
+            
+            difficulty_instructions = {
+                'EASY': 'Keep questions simple and factual — directly from the text.',
+                'MEDIUM': 'Mix factual recall with light comprehension and inference.',
+                'HARD': 'Focus on deep understanding, analysis, and synthesis across multiple chunks.',
+                'ADAPTIVE': 'Start with easy factual questions, then progress to harder analytical ones.',
+            }
+
+            prompt = f"""You are an expert educational quiz creator. Based on the following document excerpts, generate exactly {num_questions} quiz questions.
 
 DOCUMENT EXCERPTS:
 {chunk_context}
@@ -147,59 +149,75 @@ Each element must have this exact structure:
   "source_chunk_ids": [CHUNK_ID, ...]
 }}"""
 
-        try:
-            crewai_result = generate_quiz_with_crewai(chunk_context, prompt)
-            
-            if hasattr(crewai_result, 'raw'):
-                response_text = crewai_result.raw
-            else:
-                response_text = str(crewai_result)
+            try:
+                crewai_result = generate_quiz_with_crewai(chunk_context, prompt)
+                
+                if hasattr(crewai_result, 'raw'):
+                    response_text = crewai_result.raw
+                else:
+                    response_text = str(crewai_result)
 
-            # In case CrewAI returned markdown wrapped json
-            clean_json = response_text.replace("```json", "").replace("```", "").strip()
-            questions_data = json.loads(clean_json)
-        except json.JSONDecodeError as e:
-            logger.error("Gemini returned invalid JSON: %s", e)
-            return Response({'error': 'AI returned malformed JSON. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except Exception as e:
-            logger.error("Gemini generation error: %s", e, exc_info=True)
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                clean_json = response_text.replace("```json", "").replace("```", "").strip()
+                questions_data = json.loads(clean_json)
+                
+                # LLMs sometimes return an object like {"questions": [...]} instead of an array
+                if isinstance(questions_data, dict):
+                    # Try to extract the first list value found in the dict
+                    extracted_list = next((v for v in questions_data.values() if isinstance(v, list)), None)
+                    if extracted_list:
+                        questions_data = extracted_list
+                    else:
+                        raise ValueError("AI returned a JSON object, but no question array was found inside.")
+                        
+                if not isinstance(questions_data, list):
+                    raise ValueError(f"AI returned {type(questions_data).__name__} instead of a JSON array.")
+                    
+            except json.JSONDecodeError as e:
+                logger.error("Gemini returned invalid JSON: %s", e)
+                return Response({'error': 'AI returned malformed JSON. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            except Exception as e:
+                logger.error("Gemini generation error: %s", e, exc_info=True)
+                return Response({'error': f"Failed to generate quiz with AI: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # --- 3. Persist Quiz and Questions ---
-        quiz = Quiz.objects.create(
-            user=request.user,
-            title=f"Quiz: {doc.title}",
-            scope=scope,
-            difficulty=difficulty,
-            total_questions=len(questions_data),
-        )
-        quiz.documents.add(doc)
-
-        for q_data in questions_data:
-            q_type = q_data.get('question_type', 'MCQ')
-            source_ids = q_data.get('source_chunk_ids', [])
-            
-            # Find the primary chunk reference
-            primary_chunk = None
-            for cid in source_ids:
-                if cid in chunk_id_map:
-                    primary_chunk = chunk_id_map[cid]
-                    break
-
-            Question.objects.create(
-                quiz=quiz,
-                chunk=primary_chunk,
-                question_text=q_data.get('question', ''),
-                question_type=q_type,
-                options=q_data.get('options', []),
-                correct_answer=q_data.get('correct_answer', ''),
-                explanation=q_data.get('explanation', ''),
-                difficulty=q_data.get('difficulty', difficulty),
-                source_chunk_ids=source_ids,
+            # --- 3. Persist Quiz and Questions ---
+            quiz = Quiz.objects.create(
+                user=request.user,
+                title=f"Quiz: {doc.title}",
+                scope=scope,
+                difficulty=difficulty,
+                total_questions=len(questions_data),
             )
+            quiz.documents.add(doc)
 
-        serializer = QuizSerializer(quiz)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            for q_data in questions_data:
+                q_type = q_data.get('question_type', 'MCQ')
+                source_ids = q_data.get('source_chunk_ids', [])
+                
+                # Find the primary chunk reference
+                primary_chunk = None
+                for cid in source_ids:
+                    if cid in chunk_id_map:
+                        primary_chunk = chunk_id_map[cid]
+                        break
+
+                Question.objects.create(
+                    quiz=quiz,
+                    chunk=primary_chunk,
+                    question_text=q_data.get('question', ''),
+                    question_type=q_type,
+                    options=q_data.get('options', []),
+                    correct_answer=q_data.get('correct_answer', q_data.get('answer', '')),
+                    explanation=q_data.get('explanation', ''),
+                    difficulty=q_data.get('difficulty', difficulty),
+                    source_chunk_ids=source_ids,
+                )
+
+            serializer = QuizSerializer(quiz)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error("Unhandled error in QuizGenerateView: %s", str(e), exc_info=True)
+            return Response({'error': f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class QuizSubmitView(APIView):
