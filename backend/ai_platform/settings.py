@@ -122,7 +122,37 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CORS_ALLOW_ALL_ORIGINS = True # For dev
+# ---------------------------------------------------------------------------
+# CORS – allow the Next.js dev server to talk to Django without CORS errors.
+# We list both localhost and 127.0.0.1 because browsers treat them as
+# different origins, and some (e.g. Chrome) refuse to set credentials on
+# wildcard origins.
+# ---------------------------------------------------------------------------
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",   # fallback if 3000 is busy
+    "http://127.0.0.1:3001",
+]
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+# Email – use console backend in dev so admin dispatch doesn't require SMTP
+EMAIL_BACKEND = env(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.console.EmailBackend'
+)
 
 CELERY_BROKER_URL = env('REDIS_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = 'django-db'
