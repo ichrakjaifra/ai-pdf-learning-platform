@@ -6,12 +6,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import Document
 from .serializers import DocumentSerializer
+from apps.users.permissions import IsOwnerOrAdmin
 
 class DocumentListView(generics.ListCreateAPIView):
     serializer_class = DocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return Document.objects.all().order_by('-created_at')
         return Document.objects.filter(user=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
@@ -88,7 +91,10 @@ class NotifyUploadReadyView(APIView):
 
     def post(self, request, pk):
         try:
-            doc = Document.objects.get(pk=pk, user=request.user)
+            if request.user.role == 'ADMINISTRATEUR':
+                doc = Document.objects.get(pk=pk)
+            else:
+                doc = Document.objects.get(pk=pk, user=request.user)
         except Document.DoesNotExist:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
         
@@ -112,7 +118,9 @@ class NotifyUploadReadyView(APIView):
 
 class DocumentDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = DocumentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return Document.objects.all()
         return Document.objects.filter(user=self.request.user)

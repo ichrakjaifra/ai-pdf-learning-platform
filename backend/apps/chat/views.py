@@ -4,6 +4,7 @@ from .models import ChatSession, Message
 from .serializers import ChatSessionSerializer, MessageSerializer
 from django.conf import settings
 from pgvector.django import L2Distance
+from apps.users.permissions import IsOwnerOrAdmin
 
 # Global initialization
 import google.generativeai as genai
@@ -20,6 +21,8 @@ class ChatSessionListView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return ChatSession.objects.all().order_by('-updated_at')
         return ChatSession.objects.filter(user=self.request.user).order_by('-updated_at')
         
     def perform_create(self, serializer):
@@ -30,9 +33,11 @@ from apps.documents.models import Document
 
 class ChatSessionDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = ChatSessionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return ChatSession.objects.all()
         return ChatSession.objects.filter(user=self.request.user)
 
     def get_object(self):
@@ -42,18 +47,27 @@ class ChatSessionDetailView(generics.RetrieveDestroyAPIView):
         
         # 1. Try to fetch by ChatSession ID
         try:
+            if user.role == 'ADMINISTRATEUR':
+                return ChatSession.objects.get(pk=pk)
             return ChatSession.objects.get(pk=pk, user=user)
         except ChatSession.DoesNotExist:
             pass
             
         # 2. Fallback: Assume it's a Document ID.
         # Find if a chat session already exists for this document
-        existing_session = ChatSession.objects.filter(user=user, documents__id=pk).first()
+        if user.role == 'ADMINISTRATEUR':
+            existing_session = ChatSession.objects.filter(documents__id=pk).first()
+        else:
+            existing_session = ChatSession.objects.filter(user=user, documents__id=pk).first()
+            
         if existing_session:
             return existing_session
             
         # 3. Create a new ChatSession for this document
-        doc = get_object_or_404(Document, pk=pk, user=user)
+        if user.role == 'ADMINISTRATEUR':
+            doc = get_object_or_404(Document, pk=pk)
+        else:
+            doc = get_object_or_404(Document, pk=pk, user=user)
         new_session = ChatSession.objects.create(
             user=user,
             title=f"Chat about {doc.title}"
@@ -72,7 +86,7 @@ class MessageCreateView(generics.CreateAPIView):
         
         # Verify ownership
         chat_session = serializer.validated_data['chat_session']
-        if chat_session.user != request.user:
+        if chat_session.user != request.user and request.user.role != 'ADMINISTRATEUR':
             return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
             
         user_message = serializer.save(role='user')
@@ -146,7 +160,10 @@ class MessageClearView(generics.DestroyAPIView):
     def delete(self, request, *args, **kwargs):
         session_id = self.kwargs.get('pk')
         try:
-            chat_session = ChatSession.objects.get(pk=session_id, user=request.user)
+            if request.user.role == 'ADMINISTRATEUR':
+                chat_session = ChatSession.objects.get(pk=session_id)
+            else:
+                chat_session = ChatSession.objects.get(pk=session_id, user=request.user)
             deleted_count, _ = chat_session.messages.all().delete()
             return Response({'message': f'Cleared {deleted_count} messages.'}, status=status.HTTP_200_OK)
         except ChatSession.DoesNotExist:

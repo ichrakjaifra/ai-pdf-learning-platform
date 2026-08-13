@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.documents.models import Document, Chunk
+from apps.users.permissions import IsOwnerOrAdmin
 from .models import Quiz, Question, Result
 from .serializers import QuizSerializer, ResultSerializer, QuestionDetailSerializer
 
@@ -43,14 +44,18 @@ class QuizListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return Quiz.objects.all().order_by('-created_at')
         return Quiz.objects.filter(user=self.request.user).order_by('-created_at')
 
 
 class QuizDetailView(generics.RetrieveAPIView):
     serializer_class = QuizSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
 
     def get_queryset(self):
+        if self.request.user.role == 'ADMINISTRATEUR':
+            return Quiz.objects.all()
         return Quiz.objects.filter(user=self.request.user)
 
 
@@ -73,7 +78,10 @@ class QuizGenerateView(APIView):
             return Response({'error': 'document_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            doc = Document.objects.get(pk=document_id, user=request.user)
+            if request.user.role == 'ADMINISTRATEUR':
+                doc = Document.objects.get(pk=document_id)
+            else:
+                doc = Document.objects.get(pk=document_id, user=request.user)
         except Document.DoesNotExist:
             return Response({'error': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -208,7 +216,10 @@ class QuizSubmitView(APIView):
 
     def post(self, request, pk):
         try:
-            quiz = Quiz.objects.get(pk=pk, user=request.user)
+            if request.user.role == 'ADMINISTRATEUR':
+                quiz = Quiz.objects.get(pk=pk)
+            else:
+                quiz = Quiz.objects.get(pk=pk, user=request.user)
         except Quiz.DoesNotExist:
             return Response({'error': 'Quiz not found.'}, status=status.HTTP_404_NOT_FOUND)
 
