@@ -1,3 +1,5 @@
+import json
+from django.http import StreamingHttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from .models import ChatSession, Message
@@ -114,7 +116,7 @@ class MessageCreateView(generics.CreateAPIView):
             else:
                 context_text = "\n\n".join([f"Excerpt from page {c.page_number}:\n{c.content}" for c in chunks])
             
-            # 3. Call Gemini
+            # 3. Call Gemini with streaming
             target_model = 'gemini-3.5-flash'
             available_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             
@@ -124,24 +126,35 @@ class MessageCreateView(generics.CreateAPIView):
             model = genai.GenerativeModel(target_model)
             prompt = f"Context information is below.\n---------------------\n{context_text}\n---------------------\nBased on the context, answer the user's query. If the answer is not in the context, say so.\nQuery: {user_message.content}"
             
-            response = model.generate_content(prompt)
-            ai_text = response.text
-            
-            # 4. Save AI message
-            ai_message = Message.objects.create(
-                chat_session=chat_session,
-                role='ai',
-                content=ai_text
-            )
-            # Link citations
-            ai_message.citations.set(chunks)
-            
-            # Update chat session timestamp
-            chat_session.save(update_fields=['updated_at'])
-            
-            # 5. Return the AI message to frontend
-            ai_serializer = self.get_serializer(ai_message)
-            return Response(ai_serializer.data, status=status.HTTP_201_CREATED)
+            def event_stream():
+                try:
+                    response = model.generate_content(prompt, stream=True)
+                    full_text = ""
+                    for chunk in response:
+                        text_chunk = chunk.text
+                        full_text += text_chunk
+                        yield f"data: {json.dumps({'content': text_chunk})}\n\n"
+                    
+                    # 4. Save AI message
+                    ai_message = Message.objects.create(
+                        chat_session=chat_session,
+                        role='ai',
+                        content=full_text
+                    )
+                    ai_message.citations.set(chunks)
+                    chat_session.save(update_fields=['updated_at'])
+                    
+                    # 5. Return the citations and completion flag
+                    citations_data = [
+                        {'id': c.id, 'page_number': c.page_number, 'content': c.content} 
+                        for c in chunks
+                    ]
+                    yield f"data: {json.dumps({'message_id': ai_message.id, 'citations': citations_data, 'done': True})}\n\n"
+                except Exception as e:
+                    logger.error("Streaming error: %s", str(e), exc_info=True)
+                    yield f"data: {json.dumps({'error': 'An error occurred during response generation.'})}\n\n"
+
+            return StreamingHttpResponse(event_stream(), content_type='text/event-stream')
             
         except Exception as e:
             import logging

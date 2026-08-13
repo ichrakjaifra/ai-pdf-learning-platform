@@ -12,6 +12,7 @@ interface Message {
   role: "user" | "ai";
   content: string;
   isError?: boolean;
+  citations?: Array<{id: number, page_number: number, content: string}>;
 }
 
 export default function ChatPage() {
@@ -27,6 +28,7 @@ export default function ChatPage() {
   const [documentId, setDocumentId] = useState<number | null>(null);
   const [documentTitle, setDocumentTitle] = useState<string>("");
   const [showQuizModal, setShowQuizModal] = useState(false);
+  const [activeCitation, setActiveCitation] = useState<{id: number, content: string, page_number: number} | null>(null);
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -65,16 +67,72 @@ export default function ChatPage() {
     setIsTyping(true);
 
     try {
-      const res = await api.post("/chat/message/", {
-        chat_session: sessionId,
-        content: userText,
-        role: "user"
+      const token = localStorage.getItem("access_token");
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/chat/message/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          chat_session: sessionId,
+          content: userText,
+          role: "user"
+        })
       });
-      setMessages((prev) => [...prev, res.data]);
+
+      if (!response.ok) {
+        throw new Error("Failed to generate response.");
+      }
+
+      setMessages((prev) => [...prev, { role: "ai", content: "" }]);
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let aiResponseText = "";
+
+      if (reader) {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (data.error) throw new Error(data.error);
+
+                if (data.content) {
+                  aiResponseText += data.content;
+                  setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1].content = aiResponseText;
+                    return newMessages;
+                  });
+                }
+
+                if (data.done) {
+                  setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1].id = data.message_id;
+                    newMessages[newMessages.length - 1].citations = data.citations;
+                    return newMessages;
+                  });
+                }
+              } catch (e) {
+                // partial JSON chunks can be ignored safely here
+              }
+            }
+          }
+        }
+      }
     } catch (err: any) {
       setMessages((prev) => [
         ...prev, 
-        { role: "ai", content: err.response?.data?.error || "An error occurred while generating the response.", isError: true }
+        { role: "ai", content: err.message || "An error occurred.", isError: true }
       ]);
     } finally {
       setIsTyping(false);
@@ -157,6 +215,19 @@ export default function ChatPage() {
               </div>
               <div className={clsx("p-4 rounded-2xl glass-card", msg.role === "user" ? "bg-secondary/10" : "bg-surface/50", msg.isError ? "border-red-500/50 bg-red-500/10 text-red-400" : "")}>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                {msg.citations && msg.citations.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {msg.citations.map((c, idx) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setActiveCitation(c)}
+                        className="text-xs bg-surface/50 border border-white/10 hover:border-accent hover:text-accent px-2 py-1 rounded transition-colors"
+                      >
+                        [Citation {idx + 1}: Page {c.page_number}]
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -215,6 +286,30 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+      {/* Active Citation Modal */}
+      {activeCitation && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-white/10 p-6 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <FileText className="text-accent" />
+                Source Reference (Page {activeCitation.page_number})
+              </h3>
+              <button 
+                onClick={() => setActiveCitation(null)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2">
+              <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
+                {activeCitation.content}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
