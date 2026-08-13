@@ -32,11 +32,11 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.post("/users/login/", { username, password });
+      const res = await api.post("/users/login", { username, password });
       localStorage.setItem("access_token", res.data.access);
       localStorage.setItem("refresh_token", res.data.refresh);
 
-      const userRes = await api.get("/users/me/");
+      const userRes = await api.get("/users/me");
       setUser(userRes.data);
       router.push("/dashboard");
     } catch (err: any) {

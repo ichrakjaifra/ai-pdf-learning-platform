@@ -49,7 +49,7 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      await api.post("/users/register/", {
+      await api.post("/users/register", {
         username,
         email,
         password,
