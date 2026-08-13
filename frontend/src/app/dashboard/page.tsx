@@ -20,6 +20,8 @@ interface DashboardStats {
   total_chats: number;
   quizzes_passed: number;
   recent_documents: Document[];
+  study_streak?: number;
+  weak_concepts?: string[];
 }
 
 const STATUS_CONFIG = {
@@ -76,17 +78,45 @@ export default function DashboardPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Dashboard Overview</h1>
-        <button
-          onClick={fetchStats}
-          className="text-sm text-gray-400 hover:text-white flex items-center gap-2 transition-colors"
-        >
-          <Loader2 size={14} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/users/export-report/`, '_blank')}
+            className="flex items-center gap-2 px-4 py-2 bg-surface border border-white/10 hover:border-accent hover:text-accent rounded-lg text-sm font-medium transition-colors"
+          >
+            <FileText size={16} />
+            Download Report
+          </button>
+          <button
+            onClick={fetchStats}
+            className="text-sm text-gray-400 hover:text-white flex items-center gap-2 transition-colors"
+          >
+            <Loader2 size={14} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
+      {/* Analytics Highlights */}
+      {stats?.weak_concepts && stats.weak_concepts.length > 0 && stats.weak_concepts[0] !== "No weak areas identified yet. Great job!" && (
+        <div className="mb-8 p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5">
+          <div className="flex items-start gap-4">
+            <div className="p-3 bg-yellow-500/20 rounded-xl text-yellow-500">
+              <BrainCircuit size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-yellow-500 mb-2">Focus Areas Identified</h3>
+              <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
+                {stats.weak_concepts.map((concept, idx) => (
+                  <li key={idx}>{concept}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
         <StatsCard
           icon={<FileText className="text-primary" size={24} />}
           title="Total Documents"
@@ -103,6 +133,12 @@ export default function DashboardPage() {
           icon={<BrainCircuit className="text-accent" size={24} />}
           title="Quizzes Passed"
           value={String(stats?.quizzes_passed ?? 0)}
+          href="/dashboard/documents"
+        />
+        <StatsCard
+          icon={<BookOpen className="text-green-400" size={24} />}
+          title="Study Streak"
+          value={`${stats?.study_streak ?? 0} Days`}
         />
       </div>
 
