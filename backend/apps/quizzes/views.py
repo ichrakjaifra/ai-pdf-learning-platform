@@ -13,6 +13,7 @@ from apps.documents.models import Document, Chunk
 from apps.users.permissions import IsOwnerOrAdmin
 from .models import Quiz, Question, Result
 from .serializers import QuizSerializer, ResultSerializer, QuestionDetailSerializer
+from apps.agents.workflows import generate_quiz_with_crewai, evaluate_open_questions_with_crewai
 
 logger = logging.getLogger(__name__)
 
@@ -147,21 +148,16 @@ Each element must have this exact structure:
 }}"""
 
         try:
-            model = get_gemini_model()
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.7,
-                )
-            )
-            raw_json = response.text.strip()
-            # Strip markdown fences if present
-            if raw_json.startswith("```"):
-                raw_json = raw_json.split("```")[1]
-                if raw_json.startswith("json"):
-                    raw_json = raw_json[4:]
-            questions_data = json.loads(raw_json)
+            crewai_result = generate_quiz_with_crewai(chunk_context, prompt)
+            
+            if hasattr(crewai_result, 'raw'):
+                response_text = crewai_result.raw
+            else:
+                response_text = str(crewai_result)
+
+            # In case CrewAI returned markdown wrapped json
+            clean_json = response_text.replace("```json", "").replace("```", "").strip()
+            questions_data = json.loads(clean_json)
         except json.JSONDecodeError as e:
             logger.error("Gemini returned invalid JSON: %s", e)
             return Response({'error': 'AI returned malformed JSON. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -279,14 +275,15 @@ For each question, return a JSON object with:
 
 Return a JSON array of these objects. Only raw JSON, no markdown."""
 
-                response = model.generate_content(
-                    grading_prompt,
-                    generation_config=genai.GenerationConfig(
-                        response_mime_type="application/json",
-                        temperature=0.2,
-                    )
-                )
-                grading_results = json.loads(response.text.strip())
+                crewai_result = evaluate_open_questions_with_crewai(grading_prompt)
+                
+                if hasattr(crewai_result, 'raw'):
+                    response_text = crewai_result.raw
+                else:
+                    response_text = str(crewai_result)
+                    
+                clean_json = response_text.replace("```json", "").replace("```", "").strip()
+                grading_results = json.loads(clean_json)
                 for gr in grading_results:
                     qid = str(gr.get('question_id'))
                     q_obj = next((q for q, _ in open_questions_to_grade if str(q.id) == qid), None)
