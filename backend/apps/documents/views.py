@@ -32,6 +32,15 @@ class GeneratePresignedUrlView(APIView):
         
         user = request.user
         
+        # Check file size limit (50MB)
+        if int(file_size) > 50 * 1024 * 1024:
+            return Response({'error': 'File size exceeds 50MB limit.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Check for duplicate filename
+        if Document.objects.filter(user=user, title=filename).exists():
+            return Response({'error': 'A document with this name already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        
         # Check quota
         current_storage = sum(doc.file_size for doc in Document.objects.filter(user=user))
         if current_storage + int(file_size) > user.quota_storage_mb * 1024 * 1024:
@@ -124,3 +133,27 @@ class DocumentDetailView(generics.RetrieveDestroyAPIView):
         if self.request.user.role == 'ADMINISTRATEUR':
             return Document.objects.all()
         return Document.objects.filter(user=self.request.user)
+
+    def perform_destroy(self, instance):
+        # Delete from S3/MinIO if possible
+        if instance.file_url:
+            try:
+                # Extract key from file_url (e.g. http://localhost:9000/bucket-name/uploads/...)
+                # It's usually after the bucket name
+                bucket_name = settings.AWS_STORAGE_BUCKET_NAME
+                if bucket_name in instance.file_url:
+                    key = instance.file_url.split(f"{bucket_name}/")[-1]
+                    s3_client = boto3.client(
+                        's3',
+                        endpoint_url=f"http://{settings.MINIO_ENDPOINT}",
+                        aws_access_key_id=settings.MINIO_ACCESS_KEY,
+                        aws_secret_access_key=settings.MINIO_SECRET_KEY,
+                        config=boto3.session.Config(signature_version='s3v4')
+                    )
+                    s3_client.delete_object(Bucket=bucket_name, Key=key)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to delete S3 object {instance.file_url}: {e}")
+        
+        # Finally delete the DB instance (cascades to Chunks which deletes vectors)
+        instance.delete()
