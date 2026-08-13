@@ -11,18 +11,31 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ('role', 'quota_documents', 'quota_storage_mb')
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=8)
+    role = serializers.ChoiceField(
+        choices=["APPRENANT", "ADMIN"],
+        default="APPRENANT",
+        required=False,
+    )
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password')
+        fields = ('username', 'email', 'password', 'role')
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with that email already exists.")
+        return value
 
     def create(self, validated_data):
+        role = validated_data.pop('role', 'APPRENANT')
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            password=validated_data['password'],
         )
+        user.role = role
+        user.save()
         return user
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
