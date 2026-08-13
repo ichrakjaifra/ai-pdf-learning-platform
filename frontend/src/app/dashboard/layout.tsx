@@ -8,7 +8,8 @@ import clsx from "clsx";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { user, logout } = useAuthStore((state) => ({ user: state.user, logout: state.logout }));
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
 
   const handleLogout = () => {

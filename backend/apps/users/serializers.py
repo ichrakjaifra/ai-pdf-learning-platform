@@ -35,6 +35,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
         )
         user.role = role
+        user.is_active = True
         user.save()
         return user
 
