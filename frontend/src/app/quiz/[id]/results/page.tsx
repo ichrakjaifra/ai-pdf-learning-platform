@@ -24,7 +24,7 @@ interface FeedbackEntry {
   score?: number;
   feedback?: string;
   explanation: string;
-  source_chunk_ids: number[];
+  source_chunks?: ChunkInfo[];
 }
 
 interface ChunkInfo {
@@ -45,8 +45,8 @@ export default function QuizResultsPage() {
 
   const [evaluationFeedback, setEvaluationFeedback] = useState<Record<string, FeedbackEntry>>({});
   const [questions, setQuestions] = useState<QuestionDetail[]>([]);
-  const [chunks, setChunks] = useState<Record<number, ChunkInfo>>({});
   const [documentId, setDocumentId] = useState<number | null>(null);
+  const [activeCitation, setActiveCitation] = useState<ChunkInfo | null>(null);
 
   useEffect(() => {
     if (feedbackRaw) {
@@ -181,10 +181,18 @@ export default function QuizResultsPage() {
                 </div>
 
                 {/* Source chunk reference */}
-                {fb.source_chunk_ids && fb.source_chunk_ids.length > 0 && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                    <FileText size={12} className="text-primary" />
-                    <span>Source: Chunk{fb.source_chunk_ids.length > 1 ? "s" : ""} #{fb.source_chunk_ids.join(", #")}</span>
+                {fb.source_chunks && fb.source_chunks.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2 items-center">
+                    <FileText size={14} className="text-primary mr-1" />
+                    {fb.source_chunks.map((c, idx) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setActiveCitation(c)}
+                        className="text-xs bg-surface/50 border border-white/10 hover:border-accent hover:text-accent px-2 py-1 rounded transition-colors"
+                      >
+                        [Citation {idx + 1}: Page {c.page_number}]
+                      </button>
+                    ))}
                   </div>
                 )}
               </motion.div>
@@ -208,6 +216,31 @@ export default function QuizResultsPage() {
           </button>
         </div>
       </div>
+
+      {/* Active Citation Modal */}
+      {activeCitation && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-white/10 p-6 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-4">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <FileText className="text-accent" />
+                Source Reference (Page {activeCitation.page_number})
+              </h3>
+              <button 
+                onClick={() => setActiveCitation(null)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2">
+              <p className="text-gray-300 text-sm whitespace-pre-wrap leading-relaxed">
+                {activeCitation.content}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

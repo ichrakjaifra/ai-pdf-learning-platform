@@ -236,6 +236,11 @@ class QuizSubmitView(APIView):
         for q in questions:
             user_answer = answers.get(str(q.id), '').strip()
             
+            source_chunks = []
+            if q.source_chunk_ids:
+                chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
+                source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
+
             if q.question_type in ('MCQ', 'TF'):
                 is_correct = user_answer.strip().lower() == q.correct_answer.strip().lower()
                 if is_correct:
@@ -245,7 +250,7 @@ class QuizSubmitView(APIView):
                     'correct_answer': q.correct_answer,
                     'is_correct': is_correct,
                     'explanation': q.explanation,
-                    'source_chunk_ids': q.source_chunk_ids,
+                    'source_chunks': source_chunks,
                 }
             elif q.question_type == 'OPEN':
                 open_questions_to_grade.append((q, user_answer))
@@ -288,6 +293,12 @@ Return a JSON array of these objects. Only raw JSON, no markdown."""
                     if q_obj:
                         partial_credit = gr.get('score', 0.0)
                         correct_count += partial_credit
+                        
+                        source_chunks = []
+                        if q_obj.source_chunk_ids:
+                            chunks = Chunk.objects.filter(id__in=q_obj.source_chunk_ids)
+                            source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
+                            
                         evaluation_feedback[qid] = {
                             'user_answer': answers.get(qid, ''),
                             'correct_answer': q_obj.correct_answer,
@@ -295,19 +306,24 @@ Return a JSON array of these objects. Only raw JSON, no markdown."""
                             'score': partial_credit,
                             'feedback': gr.get('feedback', ''),
                             'explanation': q_obj.explanation,
-                            'source_chunk_ids': q_obj.source_chunk_ids,
+                            'source_chunks': source_chunks,
                         }
             except Exception as e:
                 logger.error("Open question grading error: %s", e, exc_info=True)
                 # Fallback: mark as ungraded
                 for q, user_ans in open_questions_to_grade:
+                    source_chunks = []
+                    if q.source_chunk_ids:
+                        chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
+                        source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
+                        
                     evaluation_feedback[str(q.id)] = {
                         'user_answer': user_ans,
                         'correct_answer': q.correct_answer,
                         'is_correct': False,
                         'feedback': 'Could not grade automatically. Please review manually.',
                         'explanation': q.explanation,
-                        'source_chunk_ids': q.source_chunk_ids,
+                        'source_chunks': source_chunks,
                     }
 
         total = quiz.total_questions
