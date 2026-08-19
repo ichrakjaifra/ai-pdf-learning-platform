@@ -94,9 +94,10 @@ export default function QuizPage() {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const res = await api.post(`/quizzes/${quiz.id}/submit/`, { answers });
+      const res = await api.post(`/quizzes/${quiz.id}/submit`, { answers });
       router.push(`/quiz/${quiz.id}/results?score=${res.data.score}&total=${res.data.total}&correct=${res.data.correct}&feedback=${encodeURIComponent(JSON.stringify(res.data.evaluation_feedback))}`);
     } catch (err: any) {
+      console.error("Quiz submission error:", err.response?.data || err);
       alert(err.response?.data?.error || "Failed to submit quiz. Please try again.");
     } finally {
       setSubmitting(false);

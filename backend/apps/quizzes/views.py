@@ -230,58 +230,58 @@ class QuizSubmitView(APIView):
 
     def post(self, request, pk):
         try:
-            if request.user.role == 'ADMINISTRATEUR':
-                quiz = Quiz.objects.get(pk=pk)
-            else:
-                quiz = Quiz.objects.get(pk=pk, user=request.user)
-        except Quiz.DoesNotExist:
-            return Response({'error': 'Quiz not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-        if hasattr(quiz, 'result'):
-            return Response({'error': 'This quiz has already been submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        answers = request.data.get('answers', {})
-        questions = quiz.questions.all()
-        
-        correct_count = 0
-        evaluation_feedback = {}
-        open_questions_to_grade = []
-
-        for q in questions:
-            user_answer = answers.get(str(q.id), '').strip()
-            
-            source_chunks = []
-            if q.source_chunk_ids:
-                chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
-                source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
-
-            if q.question_type in ('MCQ', 'TF'):
-                is_correct = user_answer.strip().lower() == q.correct_answer.strip().lower()
-                if is_correct:
-                    correct_count += 1
-                evaluation_feedback[str(q.id)] = {
-                    'user_answer': user_answer,
-                    'correct_answer': q.correct_answer,
-                    'is_correct': is_correct,
-                    'explanation': q.explanation,
-                    'source_chunks': source_chunks,
-                }
-            elif q.question_type == 'OPEN':
-                open_questions_to_grade.append((q, user_answer))
-
-        # --- Semantic grading for OPEN questions ---
-        if open_questions_to_grade:
             try:
-                model = get_gemini_model()
-                grading_prompt_parts = []
-                for q, user_ans in open_questions_to_grade:
-                    grading_prompt_parts.append(
-                        f"Question ID {q.id}: {q.question_text}\n"
-                        f"Model Answer: {q.correct_answer}\n"
-                        f"Student Answer: {user_ans}"
-                    )
+                if request.user.role == 'ADMINISTRATEUR':
+                    quiz = Quiz.objects.get(pk=pk)
+                else:
+                    quiz = Quiz.objects.get(pk=pk, user=request.user)
+            except Quiz.DoesNotExist:
+                return Response({'error': 'Quiz not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-                grading_prompt = f"""You are a strict but fair educational evaluator. Grade each open-ended student answer below.
+            if hasattr(quiz, 'result'):
+                return Response({'error': 'This quiz has already been submitted.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            answers = request.data.get('answers', {})
+            questions = quiz.questions.all()
+            
+            correct_count = 0
+            evaluation_feedback = {}
+            open_questions_to_grade = []
+
+            for q in questions:
+                user_answer = answers.get(str(q.id), '').strip()
+                
+                source_chunks = []
+                if q.source_chunk_ids:
+                    chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
+                    source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
+
+                if q.question_type in ('MCQ', 'TF'):
+                    is_correct = user_answer.strip().lower() == q.correct_answer.strip().lower()
+                    if is_correct:
+                        correct_count += 1
+                    evaluation_feedback[str(q.id)] = {
+                        'user_answer': user_answer,
+                        'correct_answer': q.correct_answer,
+                        'is_correct': is_correct,
+                        'explanation': q.explanation,
+                        'source_chunks': source_chunks,
+                    }
+                elif q.question_type == 'OPEN':
+                    open_questions_to_grade.append((q, user_answer))
+
+            # --- Semantic grading for OPEN questions ---
+            if open_questions_to_grade:
+                try:
+                    grading_prompt_parts = []
+                    for q, user_ans in open_questions_to_grade:
+                        grading_prompt_parts.append(
+                            f"Question ID {q.id}: {q.question_text}\n"
+                            f"Model Answer: {q.correct_answer}\n"
+                            f"Student Answer: {user_ans}"
+                        )
+
+                    grading_prompt = f"""You are a strict but fair educational evaluator. Grade each open-ended student answer below.
 
 {chr(10).join(grading_prompt_parts)}
 
@@ -293,74 +293,78 @@ For each question, return a JSON object with:
 
 Return a JSON array of these objects. Only raw JSON, no markdown."""
 
-                crewai_result = evaluate_open_questions_with_crewai(grading_prompt)
-                
-                if hasattr(crewai_result, 'raw'):
-                    response_text = crewai_result.raw
-                else:
-                    response_text = str(crewai_result)
+                    crewai_result = evaluate_open_questions_with_crewai(grading_prompt)
                     
-                clean_json = response_text.replace("```json", "").replace("```", "").strip()
-                grading_results = json.loads(clean_json)
-                for gr in grading_results:
-                    qid = str(gr.get('question_id'))
-                    q_obj = next((q for q, _ in open_questions_to_grade if str(q.id) == qid), None)
-                    if q_obj:
-                        partial_credit = gr.get('score', 0.0)
-                        correct_count += partial_credit
+                    if hasattr(crewai_result, 'raw'):
+                        response_text = crewai_result.raw
+                    else:
+                        response_text = str(crewai_result)
                         
+                    clean_json = response_text.replace("```json", "").replace("```", "").strip()
+                    grading_results = json.loads(clean_json)
+                    for gr in grading_results:
+                        qid = str(gr.get('question_id'))
+                        q_obj = next((q for q, _ in open_questions_to_grade if str(q.id) == qid), None)
+                        if q_obj:
+                            partial_credit = gr.get('score', 0.0)
+                            correct_count += partial_credit
+                            
+                            source_chunks = []
+                            if q_obj.source_chunk_ids:
+                                chunks = Chunk.objects.filter(id__in=q_obj.source_chunk_ids)
+                                source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
+                                
+                            evaluation_feedback[qid] = {
+                                'user_answer': answers.get(qid, ''),
+                                'correct_answer': q_obj.correct_answer,
+                                'is_correct': gr.get('is_correct', False),
+                                'score': partial_credit,
+                                'feedback': gr.get('feedback', ''),
+                                'explanation': q_obj.explanation,
+                                'source_chunks': source_chunks,
+                            }
+                except Exception as e:
+                    logger.error("Open question grading error: %s", e, exc_info=True)
+                    # Fallback: mark as ungraded
+                    for q, user_ans in open_questions_to_grade:
                         source_chunks = []
-                        if q_obj.source_chunk_ids:
-                            chunks = Chunk.objects.filter(id__in=q_obj.source_chunk_ids)
+                        if q.source_chunk_ids:
+                            chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
                             source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
                             
-                        evaluation_feedback[qid] = {
-                            'user_answer': answers.get(qid, ''),
-                            'correct_answer': q_obj.correct_answer,
-                            'is_correct': gr.get('is_correct', False),
-                            'score': partial_credit,
-                            'feedback': gr.get('feedback', ''),
-                            'explanation': q_obj.explanation,
+                        evaluation_feedback[str(q.id)] = {
+                            'user_answer': user_ans,
+                            'correct_answer': q.correct_answer,
+                            'is_correct': False,
+                            'feedback': 'Could not grade automatically. Please review manually.',
+                            'explanation': q.explanation,
                             'source_chunks': source_chunks,
                         }
-            except Exception as e:
-                logger.error("Open question grading error: %s", e, exc_info=True)
-                # Fallback: mark as ungraded
-                for q, user_ans in open_questions_to_grade:
-                    source_chunks = []
-                    if q.source_chunk_ids:
-                        chunks = Chunk.objects.filter(id__in=q.source_chunk_ids)
-                        source_chunks = [{'id': c.id, 'page_number': c.page_number, 'content': c.content} for c in chunks]
-                        
-                    evaluation_feedback[str(q.id)] = {
-                        'user_answer': user_ans,
-                        'correct_answer': q.correct_answer,
-                        'is_correct': False,
-                        'feedback': 'Could not grade automatically. Please review manually.',
-                        'explanation': q.explanation,
-                        'source_chunks': source_chunks,
-                    }
 
-        total = quiz.total_questions
-        final_score = round((correct_count / total) * 100, 1) if total > 0 else 0.0
+            total = quiz.total_questions
+            final_score = round((correct_count / total) * 100, 1) if total > 0 else 0.0
 
-        result = Result.objects.create(
-            quiz=quiz,
-            user=request.user,
-            score=final_score,
-            total=total,
-            detailed_answers=answers,
-            evaluation_feedback=evaluation_feedback,
-        )
+            result = Result.objects.create(
+                quiz=quiz,
+                user=request.user,
+                score=final_score,
+                total=total,
+                detailed_answers=answers,
+                evaluation_feedback=evaluation_feedback,
+            )
 
-        quiz.score = final_score
-        quiz.completed_at = timezone.now()
-        quiz.save(update_fields=['score', 'completed_at'])
+            quiz.score = final_score
+            quiz.completed_at = timezone.now()
+            quiz.save(update_fields=['score', 'completed_at'])
 
-        return Response({
-            'quiz_id': quiz.id,
-            'score': final_score,
-            'total': total,
-            'correct': correct_count,
-            'evaluation_feedback': evaluation_feedback,
-        }, status=status.HTTP_201_CREATED)
+            return Response({
+                'quiz_id': quiz.id,
+                'score': final_score,
+                'total': total,
+                'correct': correct_count,
+                'evaluation_feedback': evaluation_feedback,
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error("Unhandled error in QuizSubmitView: %s", str(e), exc_info=True)
+            return Response({'error': f"Failed to submit quiz: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
