@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quizDoc, setQuizDoc] = useState<Document | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -56,6 +57,28 @@ export default function DashboardPage() {
     const interval = setInterval(fetchStats, 15000);
     return () => clearInterval(interval);
   }, [fetchStats]);
+
+  const handleDownloadReport = async () => {
+    try {
+      setIsExporting(true);
+      const response = await api.get("/users/export-report/", {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `learning_report.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export report", err);
+      alert("Failed to download report. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   if (loading && !stats) {
     return (
@@ -80,11 +103,12 @@ export default function DashboardPage() {
         <h1 className="text-3xl font-bold">Dashboard Overview</h1>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/users/export-report/`, '_blank')}
-            className="flex items-center gap-2 px-4 py-2 bg-surface border border-white/10 hover:border-accent hover:text-accent rounded-lg text-sm font-medium transition-colors"
+            onClick={handleDownloadReport}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 bg-surface border border-white/10 hover:border-accent hover:text-accent rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           >
-            <FileText size={16} />
-            Download Report
+            {isExporting ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+            {isExporting ? "Exporting..." : "Download Report"}
           </button>
           <button
             onClick={fetchStats}
