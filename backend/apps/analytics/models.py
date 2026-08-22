@@ -20,3 +20,21 @@ class AdminAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.admin.username} performed {self.action} on {self.timestamp}"
+
+
+class UserConceptAnalysis(models.Model):
+    """
+    Stores the latest AI-generated weak concept analysis for a user.
+    Updated after each quiz submission — never on dashboard load.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='concept_analysis'
+    )
+    # JSON list of strings, e.g. ["Gradient Descent", "Backpropagation", ...]
+    weak_concepts = models.JSONField(default=list)
+    generated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Concept analysis for {self.user.username} (updated {self.generated_at})"

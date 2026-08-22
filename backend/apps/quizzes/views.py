@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.documents.models import Document, Chunk
+from apps.analytics.models import UserConceptAnalysis
 from apps.users.permissions import IsOwnerOrAdmin
 from .models import Quiz, Question, Result
 from .serializers import QuizSerializer, ResultSerializer, QuestionDetailSerializer
@@ -356,6 +357,53 @@ Return a JSON array of these objects. Only raw JSON, no markdown."""
             quiz.score = final_score
             quiz.completed_at = timezone.now()
             quiz.save(update_fields=['score', 'completed_at'])
+
+            # --- Async-style AI concept analysis (cached, fail-safe) ---
+            # Runs once per quiz submission. Never blocks the response if it fails.
+            try:
+                failed_results = Result.objects.filter(
+                    quiz__user=request.user, score__lt=70
+                ).order_by('-created_at').select_related('quiz')[:5]
+
+                if failed_results.exists():
+                    failed_texts = [
+                        f"Failed Quiz: {r.quiz.title} (Score: {r.score}%)"
+                        for r in failed_results
+                    ]
+                    # Also include incorrect answers from the current submission
+                    wrong_questions = [
+                        f"Wrong answer on: {fb.get('correct_answer', '')}"
+                        for fb in evaluation_feedback.values()
+                        if not fb.get('is_correct', True)
+                    ][:5]
+                    all_context = "\n".join(failed_texts + wrong_questions)
+
+                    genai.configure(api_key=settings.GEMINI_API_KEY)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    prompt = (
+                        "You are an AI tutor. Based on the following quiz failures and incorrect answers, "
+                        "identify the top 3 weak academic concepts or topics this student needs to revise. "
+                        "Return ONLY a JSON array of exactly 3 short strings (one concept each, max 10 words). "
+                        "Example: [\"Gradient descent optimisation\", \"Backpropagation chain rule\", \"Overfitting vs underfitting\"]\n\n"
+                        + all_context
+                    )
+                    ai_resp = model.generate_content(prompt)
+                    raw = ai_resp.text.strip().replace("```json", "").replace("```", "").strip()
+                    concepts = json.loads(raw)
+                    if isinstance(concepts, list):
+                        concepts = [str(c) for c in concepts[:3]]
+                    else:
+                        concepts = []
+                else:
+                    concepts = []
+
+                UserConceptAnalysis.objects.update_or_create(
+                    user=request.user,
+                    defaults={'weak_concepts': concepts}
+                )
+            except Exception as ai_err:
+                # AI analysis failure must never prevent the quiz from being saved
+                logger.warning("Concept analysis failed after quiz submission: %s", str(ai_err))
 
             return Response({
                 'quiz_id': quiz.id,

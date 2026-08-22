@@ -4,18 +4,22 @@ from rest_framework.response import Response
 from apps.documents.models import Document
 from apps.chat.models import ChatSession
 from apps.quizzes.models import Quiz, Result
+from apps.analytics.models import UserConceptAnalysis
 from django.utils import timezone
 from django.http import HttpResponse
 import csv
 from datetime import timedelta
-import google.generativeai as genai
-from django.conf import settings
+import logging
 
-# Global initialization
-genai.configure(api_key=settings.GEMINI_API_KEY)
+logger = logging.getLogger(__name__)
+
 
 class DashboardStatsView(APIView):
-    """Returns aggregated dashboard stats for the authenticated user."""
+    """
+    Returns aggregated dashboard stats for the authenticated user.
+    All data is read from the DB — no live AI/LLM calls are made here.
+    Weak concept analysis is generated once per quiz submission and cached.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -42,20 +46,18 @@ class DashboardStatsView(APIView):
 
         # Calculate Study Streak
         today = timezone.now().date()
-        activities = list(
-            Document.objects.filter(user=user).values_list('created_at', flat=True)
-        ) + list(
-            ChatSession.objects.filter(user=user).values_list('updated_at', flat=True)
-        ) + list(
-            Quiz.objects.filter(user=user, completed_at__isnull=False).values_list('completed_at', flat=True)
+        activities = (
+            list(Document.objects.filter(user=user).values_list('created_at', flat=True))
+            + list(ChatSession.objects.filter(user=user).values_list('updated_at', flat=True))
+            + list(Quiz.objects.filter(user=user, completed_at__isnull=False).values_list('completed_at', flat=True))
         )
-        
+
         # Unique dates sorted descending
         activity_dates = sorted(list(set([a.date() for a in activities])), reverse=True)
-        
+
         study_streak = 0
         current_date = today
-        
+
         # If no activity today, check if yesterday was active to keep streak alive
         if activity_dates and activity_dates[0] == today:
             for date in activity_dates:
@@ -73,31 +75,12 @@ class DashboardStatsView(APIView):
                 else:
                     break
 
-        # Calculate Top 3 Weak Concepts
-        weak_concepts = []
-        recent_results = Result.objects.filter(quiz__user=user, score__lt=70).order_by('-created_at')[:5]
-        
-        if recent_results.exists():
-            failed_texts = []
-            for res in recent_results:
-                # Naively gather failed questions if detailed results are stored in JSON or relations
-                # We can just pass the quiz topics or failed questions to the LLM
-                quiz_title = res.quiz.title
-                failed_texts.append(f"Failed Quiz: {quiz_title} (Score: {res.score}%)")
-            
-            try:
-                model = genai.GenerativeModel('gemini-3.5-flash')
-                prompt = (
-                    "Based on the following list of a student's failed quizzes, identify the top 3 weak concepts or topics they need to revise. "
-                    "Return exactly 3 short bullet points (1 sentence each max). If there isn't enough data, infer from the titles.\n\n"
-                    + "\n".join(failed_texts)
-                )
-                ai_resp = model.generate_content(prompt)
-                weak_concepts = [line.strip().lstrip('*-123456789. ') for line in ai_resp.text.strip().split('\n') if line.strip()][:3]
-            except Exception:
-                weak_concepts = ["Unable to analyze concepts at this time."]
-        else:
-            weak_concepts = ["No weak areas identified yet. Great job!"]
+        # Read cached weak concepts from DB — set by QuizSubmitView after each quiz
+        try:
+            analysis = UserConceptAnalysis.objects.get(user=user)
+            weak_concepts = analysis.weak_concepts or []
+        except UserConceptAnalysis.DoesNotExist:
+            weak_concepts = []
 
         return Response({
             "total_documents": total_documents,
@@ -105,7 +88,7 @@ class DashboardStatsView(APIView):
             "quizzes_passed": quizzes_passed,
             "recent_documents": docs_data,
             "study_streak": study_streak,
-            "weak_concepts": weak_concepts
+            "weak_concepts": weak_concepts,
         })
 
 class ExportReportView(APIView):
