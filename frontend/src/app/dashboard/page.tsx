@@ -120,24 +120,54 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Analytics Highlights */}
-      {stats?.weak_concepts && stats.weak_concepts.length > 0 && stats.weak_concepts[0] !== "No weak areas identified yet. Great job!" && (
-        <div className="mb-8 p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-yellow-500/20 rounded-xl text-yellow-500">
-              <BrainCircuit size={24} />
+      {/* Analytics Highlights — always visible */}
+      {(() => {
+        const concepts = stats?.weak_concepts ?? [];
+        const isEmpty =
+          concepts.length === 0 ||
+          concepts[0] === "No weak areas identified yet. Great job!" ||
+          concepts[0].toLowerCase().startsWith("no weak");
+
+        if (isEmpty) {
+          return (
+            <div className="mb-8 p-6 rounded-2xl border border-green-500/20 bg-green-500/5 flex items-start gap-4">
+              <div className="p-3 bg-green-500/20 rounded-xl text-green-400 shrink-0">
+                <BrainCircuit size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-green-400 mb-1">AI Concept Analysis</h3>
+                <p className="text-gray-400 text-sm">
+                  🎉 Great job! No weak areas detected yet. Complete more quizzes to get personalised AI feedback on concepts to revise.
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-lg text-yellow-500 mb-2">Focus Areas Identified</h3>
-              <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
-                {stats.weak_concepts.map((concept, idx) => (
-                  <li key={idx}>{concept}</li>
-                ))}
-              </ul>
+          );
+        }
+
+        return (
+          <div className="mb-8 p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-yellow-500/20 rounded-xl text-yellow-500 shrink-0">
+                <BrainCircuit size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-yellow-500 mb-2">Focus Areas Identified</h3>
+                <p className="text-gray-500 text-xs mb-3">AI-analysed from your recent quiz performance</p>
+                <ul className="space-y-2">
+                  {concepts.map((concept, idx) => (
+                    <li key={idx} className="flex items-start gap-2 text-gray-300 text-sm">
+                      <span className="mt-0.5 w-5 h-5 flex items-center justify-center rounded-full bg-yellow-500/20 text-yellow-400 text-xs font-bold shrink-0">
+                        {idx + 1}
+                      </span>
+                      {concept}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
