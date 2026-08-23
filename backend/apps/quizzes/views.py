@@ -151,19 +151,25 @@ Each element must have this exact structure:
 }}"""
 
             try:
-                crewai_result = generate_quiz_with_crewai(chunk_context, prompt)
+                # Use direct Gemini API call for better stability and error tracing
+                genai.configure(api_key=settings.GEMINI_API_KEY)
+                model = genai.GenerativeModel('gemini-1.5-flash')
                 
-                if hasattr(crewai_result, 'raw'):
-                    response_text = crewai_result.raw
-                else:
-                    response_text = str(crewai_result)
+                try:
+                    ai_resp = model.generate_content(prompt)
+                    response_text = ai_resp.text
+                except Exception as api_err:
+                    logger.error("Gemini API call failed: %s", str(api_err), exc_info=True)
+                    return Response(
+                        {'error': 'AI provider is temporarily unavailable or quota exceeded.'}, 
+                        status=status.HTTP_502_BAD_GATEWAY
+                    )
 
                 clean_json = response_text.replace("```json", "").replace("```", "").strip()
                 questions_data = json.loads(clean_json)
                 
                 # LLMs sometimes return an object like {"questions": [...]} instead of an array
                 if isinstance(questions_data, dict):
-                    # Try to extract the first list value found in the dict
                     extracted_list = next((v for v in questions_data.values() if isinstance(v, list)), None)
                     if extracted_list:
                         questions_data = extracted_list
@@ -178,7 +184,7 @@ Each element must have this exact structure:
                 return Response({'error': 'AI returned malformed JSON. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             except Exception as e:
                 logger.error("Gemini generation error: %s", e, exc_info=True)
-                return Response({'error': f"Failed to generate quiz with AI: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({'error': f"Failed to process AI response: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             # --- 3. Persist Quiz and Questions ---
             quiz = Quiz.objects.create(

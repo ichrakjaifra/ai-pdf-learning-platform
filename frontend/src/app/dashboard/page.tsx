@@ -52,11 +52,17 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchStats();
+    if (!stats && !error) {
+      fetchStats();
+    }
+    
     // Auto-refresh every 15 seconds (for PROCESSING status updates)
+    // We stop polling if we hit an error to avoid infinite retry loops
+    if (error) return; 
+
     const interval = setInterval(fetchStats, 15000);
     return () => clearInterval(interval);
-  }, [fetchStats]);
+  }, [fetchStats, error, stats]);
 
   const handleDownloadReport = async () => {
     try {

@@ -76,11 +76,8 @@ class DashboardStatsView(APIView):
                     break
 
         # Read cached weak concepts from DB — set by QuizSubmitView after each quiz
-        try:
-            analysis = UserConceptAnalysis.objects.get(user=user)
-            weak_concepts = analysis.weak_concepts or []
-        except UserConceptAnalysis.DoesNotExist:
-            weak_concepts = []
+        analysis = UserConceptAnalysis.objects.filter(user=user).first()
+        weak_concepts = analysis.weak_concepts if analysis else []
 
         return Response({
             "total_documents": total_documents,
