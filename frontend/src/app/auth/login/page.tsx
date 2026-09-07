@@ -38,7 +38,11 @@ export default function LoginPage() {
 
       const userRes = await api.get("/users/me");
       setUser(userRes.data);
-      router.push("/dashboard");
+      if (userRes.data.role === "ADMINISTRATEUR") {
+        router.push("/dashboard/admin/users");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       if (!err.response) {
         setError("Unable to reach the server. Please ensure the Django backend is running at http://127.0.0.1:8000.");

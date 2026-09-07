@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import { FileText, MessageSquare, BrainCircuit, Loader2, AlertCircle, ExternalLink, BookOpen } from "lucide-react";
 import Link from "next/link";
 import api from "@/lib/axios";
+import { useAuthStore } from "@/store/authStore";
+import { useRouter } from "next/navigation";
 import QuizConfigModal from "@/components/QuizConfigModal";
 
 interface Document {
@@ -32,11 +34,20 @@ const STATUS_CONFIG = {
 };
 
 export default function DashboardPage() {
+  const user = useAuthStore((state) => state.user);
+  const router = useRouter();
+
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quizDoc, setQuizDoc] = useState<Document | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    if (user?.role === 'ADMINISTRATEUR') {
+      router.replace('/dashboard/admin/users');
+    }
+  }, [user, router]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -85,6 +96,8 @@ export default function DashboardPage() {
       setIsExporting(false);
     }
   };
+
+  if (user?.role === 'ADMINISTRATEUR') return null;
 
   if (loading && !stats) {
     return (

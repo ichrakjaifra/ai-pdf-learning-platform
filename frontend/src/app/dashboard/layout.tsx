@@ -32,7 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         
         <nav className="flex-1 px-4 py-4 space-y-2">
-          {navItems.map((item) => (
+          {user?.role !== 'ADMINISTRATEUR' && navItems.map((item) => (
             <Link 
               key={item.href} 
               href={item.href}
@@ -72,13 +72,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           )}
 
-          <Link
-             href="/dashboard/upload"
-             className="flex items-center gap-3 px-4 py-3 rounded-xl bg-secondary/20 text-secondary border border-secondary/50 font-medium mt-4 hover:bg-secondary/30 transition-colors"
-          >
-             <Upload size={20} />
-             Upload PDF
-          </Link>
+          {user?.role !== 'ADMINISTRATEUR' && (
+            <Link
+               href="/dashboard/upload"
+               className="flex items-center gap-3 px-4 py-3 rounded-xl bg-secondary/20 text-secondary border border-secondary/50 font-medium mt-4 hover:bg-secondary/30 transition-colors"
+            >
+               <Upload size={20} />
+               Upload PDF
+            </Link>
+          )}
         </nav>
 
         <div className="p-4 border-t border-white/10">
