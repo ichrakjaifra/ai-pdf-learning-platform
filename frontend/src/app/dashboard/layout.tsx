@@ -46,24 +46,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
           ))}
 
-          {user?.role === 'ADMIN' && (
+          {user?.role === 'ADMINISTRATEUR' && (
             <div className="pt-4 mt-4 border-t border-white/10">
-              <div className="px-4 mb-2 text-xs font-bold text-gray-500 uppercase tracking-wider">Admin Portal</div>
-              <Link 
-                href="/admin/users"
+              <div className="px-4 mb-2 text-xs font-bold text-gray-500 uppercase tracking-wider">⚙ Admin Portal</div>
+              <Link
+                href="/dashboard/admin/users"
                 className={clsx(
                   "flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium",
-                  pathname.startsWith("/admin/users") ? "bg-primary/20 text-primary" : "text-gray-400 hover:bg-white/5 hover:text-white"
+                  pathname.startsWith("/dashboard/admin/users") ? "bg-red-500/20 text-red-400" : "text-gray-400 hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Users size={20} />
                 Manage Users
               </Link>
-              <Link 
-                href="/admin/notifications"
+              <Link
+                href="/dashboard/admin/notifications"
                 className={clsx(
                   "flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium",
-                  pathname.startsWith("/admin/notifications") ? "bg-primary/20 text-primary" : "text-gray-400 hover:bg-white/5 hover:text-white"
+                  pathname.startsWith("/dashboard/admin/notifications") ? "bg-red-500/20 text-red-400" : "text-gray-400 hover:bg-white/5 hover:text-white"
                 )}
               >
                 <ShieldAlert size={20} />

@@ -7,8 +7,17 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'role', 'quota_documents', 'quota_storage_mb')
-        read_only_fields = ('role', 'quota_documents', 'quota_storage_mb')
+        fields = ('id', 'username', 'email', 'role', 'quota_documents', 'quota_storage_mb', 'is_active', 'date_joined')
+        read_only_fields = ('role', 'quota_documents', 'quota_storage_mb', 'is_active', 'date_joined')
+
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """Full serializer for admins — allows editing role, quotas, and active status."""
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'role', 'quota_documents', 'quota_storage_mb', 'is_active', 'date_joined')
+        read_only_fields = ('id', 'username', 'email', 'date_joined')
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)

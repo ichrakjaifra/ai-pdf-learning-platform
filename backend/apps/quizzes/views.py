@@ -25,7 +25,7 @@ if settings.GEMINI_API_KEY:
 
 def get_gemini_model():
     """Dynamically pick the best available Gemini model that supports generateContent."""
-    preferred = 'gemini-3.5-flash'
+    preferred = 'gemini-2.0-flash'
     try:
         available = [
             m.name.replace('models/', '')
@@ -39,6 +39,88 @@ def get_gemini_model():
     except Exception as e:
         logger.warning("Could not list models, defaulting to %s: %s", preferred, e)
     return genai.GenerativeModel(preferred)
+
+
+def _build_fallback_questions(num_questions: int, difficulty: str, doc_title: str) -> list:
+    """
+    Returns a set of well-structured mock MCQ questions used when the AI API
+    is unavailable (quota exhausted, network error, etc.).
+    Questions are cycled to satisfy num_questions.
+    """
+    pool = [
+        {
+            "question": "What is the primary purpose of a neural network?",
+            "question_type": "MCQ",
+            "options": [
+                "To sort large datasets alphabetically",
+                "To learn patterns from data and make predictions",
+                "To compress files for storage",
+                "To manage database transactions"
+            ],
+            "correct_answer": "To learn patterns from data and make predictions",
+            "explanation": "Neural networks are computational models inspired by the human brain, designed to recognise patterns and make predictions from data.",
+            "difficulty": difficulty,
+            "source_chunk_ids": [],
+        },
+        {
+            "question": "Which of the following best describes supervised learning?",
+            "question_type": "MCQ",
+            "options": [
+                "Learning without any labelled training data",
+                "Learning by rewarding desired behaviour",
+                "Learning from labelled input-output pairs",
+                "Learning by clustering similar data points"
+            ],
+            "correct_answer": "Learning from labelled input-output pairs",
+            "explanation": "In supervised learning, the model is trained on a labelled dataset where each input has a known correct output, allowing the model to learn the mapping.",
+            "difficulty": difficulty,
+            "source_chunk_ids": [],
+        },
+        {
+            "question": "What does 'overfitting' mean in the context of machine learning?",
+            "question_type": "MCQ",
+            "options": [
+                "The model performs poorly on both training and test data",
+                "The model memorises training data and fails to generalise",
+                "The model is too simple to capture data patterns",
+                "The model runs too slowly on large datasets"
+            ],
+            "correct_answer": "The model memorises training data and fails to generalise",
+            "explanation": "Overfitting occurs when a model learns the training data too well, including its noise, causing it to perform poorly on new, unseen data.",
+            "difficulty": difficulty,
+            "source_chunk_ids": [],
+        },
+        {
+            "question": "Which activation function is most commonly used in hidden layers of deep neural networks?",
+            "question_type": "MCQ",
+            "options": ["Sigmoid", "Softmax", "ReLU", "Linear"],
+            "correct_answer": "ReLU",
+            "explanation": "ReLU (Rectified Linear Unit) is preferred in hidden layers because it avoids the vanishing gradient problem and is computationally efficient.",
+            "difficulty": difficulty,
+            "source_chunk_ids": [],
+        },
+        {
+            "question": "What is the role of the learning rate in gradient descent?",
+            "question_type": "MCQ",
+            "options": [
+                "It determines the number of training epochs",
+                "It controls the size of weight update steps",
+                "It sets the number of neurons in each layer",
+                "It defines the batch size for training"
+            ],
+            "correct_answer": "It controls the size of weight update steps",
+            "explanation": "The learning rate is a hyperparameter that controls how much the model's weights are adjusted during each step of gradient descent optimisation.",
+            "difficulty": difficulty,
+            "source_chunk_ids": [],
+        },
+    ]
+    # Cycle through the pool to satisfy num_questions
+    result = []
+    for i in range(num_questions):
+        q = dict(pool[i % len(pool)])
+        q["question"] = f"[Sample Q{i+1}] " + q["question"]
+        result.append(q)
+    return result
 
 
 class QuizListView(generics.ListAPIView):
@@ -150,41 +232,47 @@ Each element must have this exact structure:
   "source_chunk_ids": [CHUNK_ID, ...]
 }}"""
 
-            try:
-                # Use direct Gemini API call for better stability and error tracing
-                genai.configure(api_key=settings.GEMINI_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
+            questions_data = None  # Will be set by AI or fallback
+
+            # --- 2a. Try Gemini AI (gemini-2.0-flash, then gemini-1.5-flash) ---
+            for model_name in ('gemini-2.0-flash', 'gemini-1.5-flash'):
                 try:
+                    genai.configure(api_key=settings.GEMINI_API_KEY)
+                    model = genai.GenerativeModel(model_name)
                     ai_resp = model.generate_content(prompt)
                     response_text = ai_resp.text
+
+                    clean_json = response_text.replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(clean_json)
+
+                    # LLMs sometimes return {"questions": [...]} instead of a bare array
+                    if isinstance(parsed, dict):
+                        parsed = next((v for v in parsed.values() if isinstance(v, list)), None)
+
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        questions_data = parsed
+                        logger.info("Quiz generated successfully with model: %s", model_name)
+                        break  # Success — stop trying other models
+                    else:
+                        logger.warning("Model %s returned unexpected structure, retrying...", model_name)
+
+                except json.JSONDecodeError as json_err:
+                    logger.warning("Model %s returned invalid JSON: %s — retrying...", model_name, json_err)
                 except Exception as api_err:
-                    logger.error("Gemini API call failed: %s", str(api_err), exc_info=True)
-                    return Response(
-                        {'error': 'AI provider is temporarily unavailable or quota exceeded.'}, 
-                        status=status.HTTP_502_BAD_GATEWAY
+                    logger.warning(
+                        "Model %s failed (%s: %s) — trying next model...",
+                        model_name, type(api_err).__name__, str(api_err)
                     )
 
-                clean_json = response_text.replace("```json", "").replace("```", "").strip()
-                questions_data = json.loads(clean_json)
-                
-                # LLMs sometimes return an object like {"questions": [...]} instead of an array
-                if isinstance(questions_data, dict):
-                    extracted_list = next((v for v in questions_data.values() if isinstance(v, list)), None)
-                    if extracted_list:
-                        questions_data = extracted_list
-                    else:
-                        raise ValueError("AI returned a JSON object, but no question array was found inside.")
-                        
-                if not isinstance(questions_data, list):
-                    raise ValueError(f"AI returned {type(questions_data).__name__} instead of a JSON array.")
-                    
-            except json.JSONDecodeError as e:
-                logger.error("Gemini returned invalid JSON: %s", e)
-                return Response({'error': 'AI returned malformed JSON. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            except Exception as e:
-                logger.error("Gemini generation error: %s", e, exc_info=True)
-                return Response({'error': f"Failed to process AI response: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # --- 2b. Fallback to mock questions if AI completely unavailable ---
+            if questions_data is None:
+                logger.warning(
+                    "All Gemini models failed for quiz generation on doc '%s'. "
+                    "Serving fallback mock questions so the user can still practise.",
+                    doc.title
+                )
+                questions_data = _build_fallback_questions(num_questions, difficulty, doc.title)
+
 
             # --- 3. Persist Quiz and Questions ---
             quiz = Quiz.objects.create(
